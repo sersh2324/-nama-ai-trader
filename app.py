@@ -38,19 +38,33 @@ with st.sidebar:
 def cached_daily_data(symbol, api_key):
     return get_daily_data(symbol, api_key)
 
+
+
+def repair_text(value):
+    """Repair common UTF-8-as-Latin-1 mojibake without changing normal Arabic."""
+    if not isinstance(value, str):
+        return value
+    if any(marker in value for marker in ("Ã", "Â", "Ø", "Ù", "Ú", "Û")):
+        try:
+            return value.encode("latin1").decode("utf-8")
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            return value
+    return value
+
+
 def format_result(r):
     return {
         "الرمز": r["symbol"],
         "الدرجة": r["score"],
-        "الإشارة": r["signal"],
+        "الإشارة": repair_text(r["signal"]),
         "السعر": r["price"],
         "الدخول المقترح": r["entry"],
         "الهدف": r["target"],
         "وقف الخسارة": r["stop"],
         "RSI": r["rsi"],
         "ATR %": r["atr_pct"],
-        "الاتجاه": r["trend"],
-        "الأسباب": r["reasons"],
+        "الاتجاه": repair_text(r["trend"]),
+        "الأسباب": repair_text(r["reasons"]),
     }
 
 if run:
