@@ -70,7 +70,7 @@ def backtest_symbol(df, horizon=10, min_score=68):
         except Exception:
             continue
 
-        if sig["signal"] != "صعود محتمل" or sig["score"] < min_score:
+        if sig["score"] < min_score:
             continue
 
         entry = float(sig["entry"])
@@ -158,7 +158,7 @@ with st.sidebar:
     st.info("الحساب المجاني لـ Alpha Vantage محدود. استخدم 1–3 أسهم ولا تكرر الفحص بسرعة.")
 
     horizon = st.selectbox("مدة اختبار الصفقة", [5, 10, 15], index=1)
-    min_score = st.slider("أقل درجة لاختبار الإشارة", 68, 90, 68)
+    min_score = st.slider("أقل درجة لاختبار صفقة شراء", 50, 90, 68)
 
     run_scan = st.button("🔎 فحص الفرص", type="primary", use_container_width=True)
     run_backtest = st.button("🧪 تشغيل الاختبار التاريخي", use_container_width=True)
@@ -207,8 +207,8 @@ if run_backtest:
 
     st.subheader("🧪 الاختبار التاريخي الأولي")
     st.caption(
-        f"نختبر إشارات صعود بدرجة {min_score}+ ونرى ماذا حدث خلال {horizon} جلسات لاحقة. "
-        "الاختبار أولي ومحدود بتاريخ البيانات المتاح من المصدر، وليس ضمانًا للأداء المستقبلي."
+        f"نختبر فرص شراء بدرجة {min_score}+ ونرى ماذا حدث خلال {horizon} جلسات لاحقة. "
+        "الاختبار أولي ومحدود بتاريخ البيانات المتاح من المصدر. الدرجات الأقل من 68 تُختبر كفرص شراء تجريبية حتى نتمكن من مقارنة قوة الدرجات."
     )
 
     summary_rows = []
@@ -252,7 +252,7 @@ if run_backtest:
         trades_df = pd.concat(all_trades, ignore_index=True)
         st.dataframe(trades_df, use_container_width=True, hide_index=True)
     else:
-        st.info("لم تظهر إشارات صعود بالدرجة المحددة ضمن البيانات المتاحة. جرّب درجة أقل أو سهمًا آخر.")
+        st.info("لم تظهر فرص بالدرجة المحددة ضمن البيانات المتاحة. جرّب درجة أقل أو سهمًا آخر، مع الانتباه إلى أن العينة الحالية محدودة.")
 
     st.warning(
         "مهم: هذا Backtest أولي. لا يشمل عمولات التنفيذ، الانزلاق السعري، فجوات الافتتاح، "
