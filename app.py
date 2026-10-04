@@ -10,13 +10,14 @@ load_dotenv()
 
 st.set_page_config(page_title="NAMA AI Trader", page_icon="📈", layout="wide")
 st.title("📈 NAMA AI Trader")
-st.caption("v0.3 — تحليل فني + اختبار تاريخي أولي. النتائج احتمالية وليست توصية استثمارية أو ضمانًا للربح.")
+st.caption("v0.4 — تحليل فني + Backtest متقدم + جودة تاريخية. النتائج احتمالية وليست توصية استثمارية أو ضمانًا للربح.")
 
 try:
     API_KEY = st.secrets.get("ALPHA_VANTAGE_API_KEY", "")
 except Exception:
     API_KEY = ""
 API_KEY = API_KEY or os.getenv("ALPHA_VANTAGE_API_KEY", "")
+
 
 @st.cache_data(ttl=900, show_spinner=False)
 def cached_daily_data(symbol, api_key):
@@ -50,10 +51,61 @@ def format_result(r):
     }
 
 
+def empty_stats():
+    return {
+        "signals": 0, "targets": 0, "stops": 0, "unresolved": 0,
+        "ambiguous": 0, "win_rate": None, "avg_return": None,
+        "total_return": None, "avg_win": None, "avg_loss": None,
+        "profit_factor": None, "expectancy": None, "quality": None,
+        "decided": 0,
+    }
+
+
+def calculate_quality(result_df):
+    if result_df.empty:
+        return None
+
+    decided_df = result_df[result_df["النتيجة"].isin(["هدف", "وقف"])].copy()
+    if decided_df.empty:
+        return None
+
+    wins = int((decided_df["النتيجة"] == "هدف").sum())
+    losses = int((decided_df["النتيجة"] == "وقف").sum())
+    decided = wins + losses
+    win_rate = wins / decided * 100
+
+    wins_returns = decided_df.loc[decided_df["النتيجة"] == "هدف", "العائد %"]
+    loss_returns = decided_df.loc[decided_df["النتيجة"] == "وقف", "العائد %"]
+    avg_win = float(wins_returns.mean()) if not wins_returns.empty else 0.0
+    avg_loss = float(loss_returns.mean()) if not loss_returns.empty else 0.0
+
+    gross_profit = float(wins_returns.sum())
+    gross_loss = abs(float(loss_returns.sum()))
+    profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else None
+    expectancy = ((wins / decided) * avg_win) + ((losses / decided) * avg_loss)
+
+    # Conservative historical quality score: small samples are shrunk toward 50%.
+    adjusted_win = ((wins + 10) / (decided + 20)) * 100
+    pf_component = 50.0 if profit_factor is None else min(100.0, (profit_factor / (profit_factor + 1)) * 100)
+    exp_component = min(100.0, max(0.0, 50 + expectancy * 12))
+    quality = round(0.45 * adjusted_win + 0.30 * pf_component + 0.25 * exp_component)
+    quality = int(max(0, min(100, quality)))
+
+    return {
+        "decided": decided,
+        "win_rate": round(win_rate, 1),
+        "avg_win": round(avg_win, 2),
+        "avg_loss": round(avg_loss, 2),
+        "profit_factor": round(profit_factor, 2) if profit_factor is not None else None,
+        "expectancy": round(expectancy, 2),
+        "quality": quality,
+    }
+
+
 def backtest_symbol(df, horizon=10, min_score=68):
-    """Walk-forward test using only information available at each signal day.
-    Long signals are evaluated against the next `horizon` trading days.
-    If target and stop are both touched on the same candle, outcome is ambiguous.
+    """Walk-forward test using only information available on each signal day.
+    Target/stop are checked on future candles. If both are touched on the same
+    candle, the trade is marked ambiguous and excluded from win-rate metrics.
     """
     df = df.copy().sort_index()
     if len(df) < 70:
@@ -70,13 +122,15 @@ def backtest_symbol(df, horizon=10, min_score=68):
         except Exception:
             continue
 
-        if sig["score"] < min_score:
+        if sig["score"] < min_score or sig["signal"] != "صعود محتمل":
             continue
 
         entry = float(sig["entry"])
         target = float(sig["target"])
         stop = float(sig["stop"])
         future = df.iloc[i + 1 : i + 1 + horizon]
+        if future.empty:
+            continue
 
         outcome = "لم يتحقق"
         exit_price = float(future["close"].iloc[-1])
@@ -87,7 +141,7 @@ def backtest_symbol(df, horizon=10, min_score=68):
             hit_target = float(row["high"]) >= target
             hit_stop = float(row["low"]) <= stop
             if hit_target and hit_stop:
-                outcome = "ملتبس (الهدف والوقف في نفس الشمعة)"
+                outcome = "ملتبس"
                 exit_price = stop
                 exit_date = idx
                 bars_to_exit = j
@@ -120,20 +174,11 @@ def backtest_symbol(df, horizon=10, min_score=68):
 
     result_df = pd.DataFrame(trades)
     if result_df.empty:
-        return result_df, {
-            "signals": 0,
-            "targets": 0,
-            "stops": 0,
-            "unresolved": 0,
-            "ambiguous": 0,
-            "win_rate": None,
-            "avg_return": None,
-            "total_return": None,
-        }
+        return result_df, empty_stats()
 
     targets = int((result_df["النتيجة"] == "هدف").sum())
     stops = int((result_df["النتيجة"] == "وقف").sum())
-    ambiguous = int(result_df["النتيجة"].str.startswith("ملتبس").sum())
+    ambiguous = int((result_df["النتيجة"] == "ملتبس").sum())
     unresolved = int((result_df["النتيجة"] == "لم يتحقق").sum())
     decided = targets + stops
     win_rate = (targets / decided * 100) if decided else None
@@ -147,8 +192,54 @@ def backtest_symbol(df, horizon=10, min_score=68):
         "win_rate": round(win_rate, 1) if win_rate is not None else None,
         "avg_return": round(float(result_df["العائد %"].mean()), 2),
         "total_return": round(float(result_df["العائد %"].sum()), 2),
+        "decided": decided,
+        "avg_win": None,
+        "avg_loss": None,
+        "profit_factor": None,
+        "expectancy": None,
+        "quality": None,
     }
+
+    quality = calculate_quality(result_df)
+    if quality:
+        stats.update(quality)
     return result_df, stats
+
+
+def bucket_quality(all_trades):
+    if not all_trades:
+        return pd.DataFrame()
+    df = pd.concat(all_trades, ignore_index=True)
+    bins = [49, 59, 69, 79, 89, 100]
+    labels = ["50–59", "60–69", "70–79", "80–89", "90–100"]
+    df["فئة الدرجة"] = pd.cut(df["الدرجة"], bins=bins, labels=labels, include_lowest=True)
+    rows = []
+    for label in labels:
+        x = df[df["فئة الدرجة"] == label]
+        if x.empty:
+            continue
+        decided = x[x["النتيجة"].isin(["هدف", "وقف"])]
+        wins = int((decided["النتيجة"] == "هدف").sum())
+        losses = int((decided["النتيجة"] == "وقف").sum())
+        n = wins + losses
+        avg_return = float(x["العائد %"].mean())
+        pf = None
+        if losses:
+            gp = float(decided.loc[decided["النتيجة"] == "هدف", "العائد %"].sum())
+            gl = abs(float(decided.loc[decided["النتيجة"] == "وقف", "العائد %"].sum()))
+            if gl > 0:
+                pf = gp / gl
+        rows.append({
+            "فئة الدرجة": label,
+            "الإشارات": len(x),
+            "المحسومة": n,
+            "الأهداف": wins,
+            "الوقف": losses,
+            "نسبة النجاح %": round(wins / n * 100, 1) if n else None,
+            "متوسط العائد %": round(avg_return, 2),
+            "Profit Factor": round(pf, 2) if pf is not None else None,
+        })
+    return pd.DataFrame(rows)
 
 
 with st.sidebar:
@@ -156,10 +247,8 @@ with st.sidebar:
     symbols_text = st.text_area("رموز الأسهم الأمريكية", "AAPL,NVDA,MSFT")
     symbols = list(dict.fromkeys(x.strip().upper() for x in symbols_text.split(",") if x.strip()))
     st.info("الحساب المجاني لـ Alpha Vantage محدود. استخدم 1–3 أسهم ولا تكرر الفحص بسرعة.")
-
     horizon = st.selectbox("مدة اختبار الصفقة", [5, 10, 15], index=1)
     min_score = st.slider("أقل درجة لاختبار صفقة شراء", 50, 90, 68)
-
     run_scan = st.button("🔎 فحص الفرص", type="primary", use_container_width=True)
     run_backtest = st.button("🧪 تشغيل الاختبار التاريخي", use_container_width=True)
 
@@ -205,10 +294,10 @@ if run_backtest:
         st.warning("تم تقليص القائمة إلى أول 3 أسهم لتقليل استهلاك API.")
         symbols = symbols[:3]
 
-    st.subheader("🧪 الاختبار التاريخي الأولي")
+    st.subheader("🧪 الاختبار التاريخي المتقدم")
     st.caption(
         f"نختبر فرص شراء بدرجة {min_score}+ ونرى ماذا حدث خلال {horizon} جلسات لاحقة. "
-        "الاختبار أولي ومحدود بتاريخ البيانات المتاح من المصدر. الدرجات الأقل من 68 تُختبر كفرص شراء تجريبية حتى نتمكن من مقارنة قوة الدرجات."
+        "الهدف من v0.4 هو قياس جودة الإشارة، وليس إثبات الربحية المستقبلية."
     )
 
     summary_rows = []
@@ -224,11 +313,17 @@ if run_backtest:
             summary_rows.append({
                 "الرمز": symbol,
                 "الإشارات": stats["signals"],
+                "المحسومة": stats["decided"],
                 "الهدف": stats["targets"],
                 "الوقف": stats["stops"],
                 "لم يتحقق": stats["unresolved"],
                 "ملتبس": stats["ambiguous"],
                 "نسبة النجاح %": stats["win_rate"],
+                "متوسط الربح %": stats["avg_win"],
+                "متوسط الخسارة %": stats["avg_loss"],
+                "Profit Factor": stats["profit_factor"],
+                "التوقع لكل صفقة %": stats["expectancy"],
+                "جودة تاريخية /100": stats["quality"],
                 "متوسط العائد %": stats["avg_return"],
                 "مجموع العوائد %": stats["total_return"],
             })
@@ -237,8 +332,10 @@ if run_backtest:
                 all_trades.append(trades)
         except Exception as e:
             summary_rows.append({
-                "الرمز": symbol, "الإشارات": 0, "الهدف": 0, "الوقف": 0,
+                "الرمز": symbol, "الإشارات": 0, "المحسومة": 0, "الهدف": 0, "الوقف": 0,
                 "لم يتحقق": 0, "ملتبس": 0, "نسبة النجاح %": None,
+                "متوسط الربح %": None, "متوسط الخسارة %": None, "Profit Factor": None,
+                "التوقع لكل صفقة %": None, "جودة تاريخية /100": None,
                 "متوسط العائد %": None, "مجموع العوائد %": None,
             })
             st.warning(f"{symbol}: {repair_text(str(e))}")
@@ -248,33 +345,20 @@ if run_backtest:
     st.dataframe(summary_df, use_container_width=True, hide_index=True)
 
     if all_trades:
+        bucket_df = bucket_quality(all_trades)
+        st.subheader("📊 جودة الإشارة حسب الدرجة")
+        if not bucket_df.empty:
+            st.dataframe(bucket_df, use_container_width=True, hide_index=True)
+            st.info("هذه المقارنة تساعدنا على معرفة هل الدرجات الأعلى كانت أفضل تاريخيًا داخل العينة المتاحة. لا تعني أن النتيجة ستتكرر مستقبلًا.")
+
         st.subheader("📋 تفاصيل الإشارات التي تم اختبارها")
         trades_df = pd.concat(all_trades, ignore_index=True)
         st.dataframe(trades_df, use_container_width=True, hide_index=True)
     else:
-        st.info("لم تظهر فرص بالدرجة المحددة ضمن البيانات المتاحة. جرّب درجة أقل أو سهمًا آخر، مع الانتباه إلى أن العينة الحالية محدودة.")
+        st.info("لم تظهر فرص بالدرجة المحددة ضمن البيانات المتاحة. جرّب درجة أقل أو سهمًا آخر.")
 
     st.warning(
-        "مهم: هذا Backtest أولي. لا يشمل عمولات التنفيذ، الانزلاق السعري، فجوات الافتتاح، "
-        "ولا يمثل اختبارًا استثماريًا احترافيًا. قبل استخدام النظام تجاريًا سنبني محرك اختبار أدق."
+        "مهم: هذا Backtest أولي. لا يشمل عمولات التنفيذ أو الانزلاق السعري أو تفاصيل تنفيذ الأوامر، "
+        "والصفقات قد تتداخل زمنيًا. كما أن العينة محدودة بتاريخ البيانات المتاح من المصدر. "
+        "لا تستخدم جودة تاريخية كضمان للربح."
     )
-
-if "results" in st.session_state and not run_backtest:
-    st.subheader("📊 نتائج الفحص")
-    st.dataframe(st.session_state["results"], use_container_width=True, hide_index=True)
-    st.caption("البيانات ليست لحظية؛ تعتمد على البيانات اليومية المتاحة من Alpha Vantage.")
-    st.subheader("🧠 كيف حُسبت الإشارة؟")
-    st.write(
-        "الدرجة تجمع الاتجاه عبر EMA20/50/200، الزخم عبر RSI وMACD، التذبذب عبر ATR، "
-        "البولينجر والحجم. الهدف ووقف الخسارة حسابات آلية للتجربة وليست توصية."
-    )
-
-if not run_scan and not run_backtest and "results" not in st.session_state:
-    st.markdown("""
-### 🚀 ابدأ
-1. اكتب رموز الأسهم مثل `AAPL,NVDA,MSFT`.
-2. اضغط **فحص الفرص** لرؤية الإشارة الحالية.
-3. اضغط **تشغيل الاختبار التاريخي** لمعرفة كيف كان أداء الإشارات تاريخيًا ضمن البيانات المتاحة.
-
-**المرحلة التالية:** تحسين الاختبار، ثم الأخبار، السوق السعودي، والعقود/الخيارات.
-""")
