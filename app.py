@@ -122,8 +122,7 @@ def backtest_symbol(df, horizon=10, min_score=68):
         except Exception:
             continue
 
-        signal_text = repair_text(str(sig.get("signal", ""))).strip()
-        if sig["score"] < min_score or signal_text != "صعود محتمل":
+        if sig["score"] < min_score or sig["signal"] != "صعود محتمل":
             continue
 
         entry = float(sig["entry"])
@@ -364,7 +363,7 @@ if run_backtest:
         trades_df = pd.concat(all_trades, ignore_index=True)
         st.dataframe(trades_df, use_container_width=True, hide_index=True)
     else:
-        st.info("لم تظهر إشارات صعود بالدرجة المحددة ضمن البيانات المتاحة. جرّب درجة أقل مثل 50–60، أو سهمًا آخر. إذا كان فحص الفرص يعطي نتائج بينما Backtest لا يعطي شيئًا، فالنسخة الجديدة تطبع الإشارة بعد إصلاح الترميز قبل اختبارها.")
+        st.info("لم تظهر فرص بالدرجة المحددة ضمن البيانات المتاحة. جرّب درجة أقل أو سهمًا آخر.")
 
     st.warning(
         "مهم: هذا Backtest أولي. لا يشمل عمولات التنفيذ أو الانزلاق السعري أو تفاصيل تنفيذ الأوامر، "
