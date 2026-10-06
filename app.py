@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 
 from services.scanner import analyze
 from services.data_alpha_vantage import get_daily_data
-
+from symbols import US_STOCKS
 load_dotenv()
 
 st.set_page_config(page_title="NAMA AI Trader", page_icon="📈", layout="wide")
@@ -245,8 +245,29 @@ def bucket_quality(all_trades):
 
 with st.sidebar:
     st.header("⚙️ الإعداد")
-    symbols_text = st.text_area("رموز الأسهم الأمريكية", "AAPL,NVDA,MSFT")
-    symbols = list(dict.fromkeys(x.strip().upper() for x in symbols_text.split(",") if x.strip()))
+    scan_mode = st.radio(
+    "طريقة اختيار الأسهم",
+    ["إدخال يدوي", "من قائمة NAMA"],
+    horizontal=True
+)
+
+if scan_mode == "إدخال يدوي":
+    symbols_text = st.text_area(
+        "رموز الأسهم الأمريكية",
+        "AAPL,NVDA,MSFT"
+    )
+    symbols = list(dict.fromkeys(
+        x.strip().upper()
+        for x in symbols_text.split(",")
+        if x.strip()
+    ))
+else:
+    selected_symbols = st.multiselect(
+        "اختر الأسهم التي تريد فحصها",
+        US_STOCKS,
+        default=["AAPL", "NVDA", "MSFT"]
+    )
+    symbols = selected_symbols
     st.info("الحساب المجاني لـ Alpha Vantage محدود. استخدم 1–3 أسهم ولا تكرر الفحص بسرعة.")
     horizon = st.selectbox("مدة اختبار الصفقة", [5, 10, 15], index=1)
     min_score = st.slider("أقل درجة لاختبار صفقة شراء", 50, 90, 68)
