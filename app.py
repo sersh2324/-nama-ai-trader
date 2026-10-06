@@ -273,7 +273,7 @@ else:
     min_score = st.slider("أقل درجة لاختبار صفقة شراء", 50, 90, 68)
     run_scan = st.button("🔎 فحص الفرص", type="primary", use_container_width=True)
     run_backtest = st.button("🧪 تشغيل الاختبار التاريخي", use_container_width=True)
-
+run_scan = st.button("🔎 فحص الفرص", type="primary")
 if run_scan:
     if not API_KEY:
         st.error("مفتاح Alpha Vantage غير موجود. أضفه في Streamlit Secrets باسم ALPHA_VANTAGE_API_KEY.")
