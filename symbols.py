@@ -1,0 +1,22 @@
+US_STOCKS = [
+    "AAPL",
+    "MSFT",
+    "NVDA",
+    "AMD",
+    "META",
+    "GOOGL",
+    "AMZN",
+    "TSLA",
+    "NFLX",
+    "AVGO",
+    "PLTR",
+    "INTC",
+    "MU",
+    "QCOM",
+    "CRM",
+    "ADBE",
+    "ORCL",
+    "UBER",
+    "SHOP",
+    "ARM"
+]
