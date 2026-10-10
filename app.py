@@ -312,7 +312,7 @@ if "results" in st.session_state and isinstance(st.session_state["results"], pd.
     if not results_df.empty:
         st.subheader("📊 نتائج الفحص")
         st.dataframe(results_df, use_container_width=True, hide_index=True)
-
+run_backtest = st.button("🧪 تشغيل الاختبار التاريخي")
 if run_backtest:
     if not API_KEY:
         st.error("مفتاح Alpha Vantage غير موجود. أضفه في Streamlit Secrets باسم ALPHA_VANTAGE_API_KEY.")
