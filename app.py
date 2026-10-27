@@ -5,9 +5,24 @@ import pandas as pd
 import streamlit as st
 import yfinance as yf
 
-VERSION = "0.6.0"
+VERSION = "0.6.1"
 US = ["AAPL","MSFT","NVDA","AMD","META","GOOGL","AMZN","TSLA","NFLX","AVGO","PLTR","INTC","MU","QCOM","CRM","ADBE","ORCL","UBER","SHOP","ARM"]
+US_NAMES = {
+    "AAPL":"Apple — آبل", "MSFT":"Microsoft — مايكروسوفت", "NVDA":"NVIDIA — إنفيديا",
+    "AMD":"Advanced Micro Devices — إيه إم دي", "META":"Meta Platforms — ميتا",
+    "GOOGL":"Alphabet (Google) — ألفابت/جوجل", "AMZN":"Amazon — أمازون", "TSLA":"Tesla — تسلا",
+    "NFLX":"Netflix — نتفلكس", "AVGO":"Broadcom — برودكوم", "PLTR":"Palantir — بالانتير",
+    "INTC":"Intel — إنتل", "MU":"Micron Technology — ميكرون", "QCOM":"Qualcomm — كوالكوم",
+    "CRM":"Salesforce — سيلزفورس", "ADBE":"Adobe — أدوبي", "ORCL":"Oracle — أوراكل",
+    "UBER":"Uber — أوبر", "SHOP":"Shopify — شوبيفاي", "ARM":"Arm Holdings — آرم"
+}
 SA = {"2222.SR":"أرامكو السعودية","1120.SR":"مصرف الراجحي","1180.SR":"الأهلي السعودي","2010.SR":"سابك","1211.SR":"معادن","7010.SR":"stc","1010.SR":"بنك الرياض","1150.SR":"مصرف الإنماء","4190.SR":"جرير","7203.SR":"علم","2082.SR":"أكوا باور","8010.SR":"التعاونية","4001.SR":"أسواق العثيم","5110.SR":"السعودية للكهرباء"}
+
+def company_name(symbol):
+    return SA.get(symbol, US_NAMES.get(symbol, symbol))
+
+def display_symbol(symbol):
+    return f"{company_name(symbol)} ({symbol})"
 
 st.set_page_config(page_title="NAMA AI Trader", page_icon="📈", layout="wide")
 st.title("📈 NAMA AI Trader")
@@ -139,11 +154,22 @@ with st.sidebar:
     style=st.selectbox("أسلوب التداول",["مضاربة خلال الجلسة","سوينغ","استثمار طويل الأجل"],index=1)
     period=st.selectbox("الفترة",["6mo","1y","2y","5y"],index=2)
     base=US if market=="الأمريكي" else list(SA) if market=="السعودي" else US[:10]+list(SA)[:10]
-    symbols_text=st.text_area("الرموز (رمز في كل سطر)","\n".join(base[:20]),height=170)
+    st.caption("ابحث باسم الشركة أو رمز السهم، ثم اختر الأسهم التي تريد فحصها.")
+    chosen_symbols=st.multiselect(
+        "البحث والاختيار باسم الشركة أو الرمز",
+        options=base,
+        default=base[:20],
+        format_func=display_symbol,
+        max_selections=50,
+        help="ابدأ بكتابة اسم الشركة بالعربية أو الإنجليزية أو رمز السهم مثل AAPL أو 2222.SR."
+    )
+    symbols_text=st.text_area("إضافة رموز يدويًا (اختياري، رمز في كل سطر)","",height=90,
+                              help="يمكنك إدخال أي رموز أخرى غير موجودة في القائمة، مثل رمز سهم جديد.")
     min_score=st.slider("الحد الأدنى للتقييم",0,100,68)
     scan=st.button("🔎 فحص الفرص",type="primary",use_container_width=True)
 
-symbols=list(dict.fromkeys(x.strip().upper() for x in symbols_text.replace(",","\n").splitlines() if x.strip()))[:50]
+manual_symbols=[x.strip().upper() for x in symbols_text.replace(",","\n").splitlines() if x.strip()]
+symbols=list(dict.fromkeys(chosen_symbols+manual_symbols))[:50]
 for key,default in [("results",[]),("frames",{}),("watch",[]),("alerts",[]),
                     ("portfolio",pd.DataFrame(columns=["التاريخ","السوق","الرمز","النوع","الكمية","سعر العملية","سعر الخروج","ملاحظات"]))]:
     if key not in st.session_state: st.session_state[key]=default
@@ -151,7 +177,10 @@ if scan:
     rs=[]; fm={}; prog=st.progress(0)
     for i,sym in enumerate(symbols):
         a=analyze(sym,history(sym,period),style)
-        if a: fm[sym]=a.pop("_df"); rs.append(a)
+        if a:
+            fm[sym]=a.pop("_df")
+            a["اسم الشركة"]=company_name(sym)
+            rs.append(a)
         prog.progress((i+1)/max(1,len(symbols)))
     prog.empty(); rs.sort(key=lambda x:x["التقييم"],reverse=True)
     st.session_state.results=rs; st.session_state.frames=fm
@@ -168,12 +197,12 @@ with tabs[0]:
     if results:
         st.caption("آخر فحص: "+st.session_state.get("scan_time",""))
         for r in results:
-            if r["التقييم"]>=min_score: st.info(f'🔔 {r["الرمز"]}: {r["التقييم"]}/100 — {r["نوع الفرصة"]}')
+            if r["التقييم"]>=min_score: st.info(f'🔔 {company_name(r["الرمز"])} ({r["الرمز"]}): {r["التقييم"]}/100 — {r["نوع الفرصة"]}')
         table=pd.DataFrame([{k:v for k,v in r.items() if k!="أسباب التقييم"} for r in results])
         st.dataframe(table,use_container_width=True,hide_index=True)
         c=st.columns(3); c[0].metric("الأسهم المفحوصة",len(results)); c[1].metric("تجاوزت الحد",sum(x["التقييم"]>=min_score for x in results)); c[2].metric("متوسط التقييم",round(np.mean([x["التقييم"] for x in results]),1))
         st.download_button("تنزيل نتائج الفحص CSV",table.to_csv(index=False).encode("utf-8-sig"),"nama_scan_results.csv","text/csv")
-        chosen=st.selectbox("تفاصيل السهم",[x["الرمز"] for x in results]); r=next(x for x in results if x["الرمز"]==chosen)
+        chosen=st.selectbox("تفاصيل السهم",[x["الرمز"] for x in results],format_func=display_symbol); r=next(x for x in results if x["الرمز"]==chosen)
         st.write("**الإشارة:**",r["الإشارة"],"· **الأسباب:**",r["أسباب التقييم"] or "لا توجد")
         st.line_chart(frames[chosen][["Close","EMA20","EMA50","EMA200"]].tail(180))
         if st.button("➕ أضف إلى قائمة المراقبة"):
@@ -182,7 +211,7 @@ with tabs[0]:
     else: st.info("اختر السوق والأسلوب ثم اضغط فحص الفرص.")
 with tabs[1]:
     st.subheader("خطة الصفقة وحجم المركز")
-    sym=st.selectbox("السهم",[x["الرمز"] for x in results] if results else symbols,key="plan")
+    sym=st.selectbox("السهم",[x["الرمز"] for x in results] if results else symbols,key="plan",format_func=display_symbol)
     r=next((x for x in results if x["الرمز"]==sym),None)
     e0,s0,t0=(r["دخول مرجعي"],r["وقف مرجعي"],r["هدف مرجعي"]) if r else (100,95,110)
     a,b,c=st.columns(3)
@@ -221,7 +250,7 @@ with tabs[2]:
     else: st.info("لا توجد عمليات مسجلة.")
 with tabs[3]:
     st.subheader("الاختبار التاريخي")
-    sym=st.selectbox("رمز الاختبار",[x["الرمز"] for x in results] if results else symbols,key="bt")
+    sym=st.selectbox("رمز الاختبار",[x["الرمز"] for x in results] if results else symbols,key="bt",format_func=display_symbol)
     a,b,c=st.columns(3); bp=a.selectbox("الفترة",["1y","2y","5y"],index=2); horizon=a.selectbox("أقصى مدة احتفاظ", [5,10,15,20,40],index=1)
     threshold=b.slider("حد التقييم",0,100,min_score); fees=b.number_input("تكاليف الدخول والخروج %",0.0,3.0,.15,.05)
     slip=c.number_input("الانزلاق السعري الإجمالي %",0.0,3.0,.10,.05); bst=c.selectbox("أسلوب الخروج",["سوينغ","مضاربة خلال الجلسة","استثمار طويل الأجل"])
@@ -240,7 +269,7 @@ with tabs[3]:
         else: st.warning("لا توجد صفقات وفق هذه الشروط.")
     st.markdown("**المنهجية:** الإشارة عند إغلاق الجلسة والدخول في افتتاح الجلسة التالية؛ لا توجد صفقات متداخلة على الرمز نفسه. إذا لمس الوقف والهدف في شمعة واحدة يُفترض الوقف أولًا. التكاليف تقديرية والنتائج لا تضمن الأداء المستقبلي.")
 with tabs[4]:
-    sym=st.selectbox("رمز الأخبار والبيانات الأساسية",[x["الرمز"] for x in results] if results else symbols,key="fund")
+    sym=st.selectbox("سهم الأخبار والبيانات الأساسية",[x["الرمز"] for x in results] if results else symbols,key="fund",format_func=display_symbol)
     if st.button("تحميل الأخبار والبيانات الأساسية"):
         info,news=fundamentals_news(sym); st.session_state.fund_result=(sym,info,news)
     if st.session_state.get("fund_result") and st.session_state.fund_result[0]==sym:
@@ -267,7 +296,7 @@ with tabs[5]:
         if st.button("مسح التنبيهات"): st.session_state.alerts=[]; st.rerun()
     else: st.info("لا توجد تنبيهات بعد.")
 with st.expander("قائمة المراقبة وحدود النسخة"):
-    st.write("قائمة المراقبة:",", ".join(st.session_state.watch) if st.session_state.watch else "فارغة")
+    st.write("قائمة المراقبة:",", ".join(display_symbol(x) for x in st.session_state.watch) if st.session_state.watch else "فارغة")
     if st.session_state.watch and st.button("مسح قائمة المراقبة"): st.session_state.watch=[]; st.rerun()
     st.markdown("- بيانات الأسعار يومية؛ خيار المضاربة يغير مضاعفات الوقف والهدف فقط ولا يعني بيانات لحظية.\n- سجل المحفظة والمراقبة والتنبيهات محفوظة في الجلسة الحالية فقط؛ نزّل CSV للاحتفاظ بنسخة.\n- تغطية Yahoo Finance تختلف حسب الرمز والسوق، خصوصًا الأخبار والبيانات الأساسية للسوق السعودي.\n- التحليل تعليمي وليس توصية مالية أو ضمانًا للربح.")
 st.caption("NAMA AI Trader — للاستخدام التعليمي والبحثي فقط.")
